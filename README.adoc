@@ -6,3 +6,151 @@ This repository is based on https://github.com/jenkinsci/docker-ssh-agent, that 
 ```sh
 docker pull qqbuby/jenkins-ssh-dind-agent
 ```
+
+=== Configuring Agents running Docker in Docker
+
+. Open up a terminal window, and create a directory named _agents/dind_:
++
+```sh
+mkdir -p agents/dind
+cd agents/dind
+```
+
+. Create an environment file named _.env_ and set the project name with _jenkins-agents-dind_:
++
+```sh
+echo -n COMPOSE_PROJECT_NAME=jenkins-agents-dind > .env
+```
+
+. Create a bridge network for the agent:
++
+```sh
+docker network create -d bridge jenkins-agents-dind
+```
+
+. Create a compose file named `compose.yml` with the following content:
++
+```yml
+version: "2.4"
+services:
+  agent:
+    container_name: jenkins-agent-dind
+    image: qqbuby/jenkins-ssh-dind-agent:5.25.0-jdk21
+#    build:
+#      context: .
+#      dockerfile_inline: |
+#        ARG SSH_AGENET_TAG=jdk21
+#        FROM jenkins/ssh-agent:$${SSH_AGENET_TAG}
+#        ARG DOCKER_CE_CLI_VERSION=5:25.0.1-1~debian.12~bookworm
+#        RUN apt-get update \
+#            && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+#                ca-certificates \
+#                curl \
+#                lsb-release \
+#            && rm -rf /var/lib/apt/lists/*
+#        RUN curl -fsSLo /usr/share/keyrings/docker-archive-keyring.asc https://download.docker.#com/linux/debian/gpg
+#        RUN echo "deb [arch=$(dpkg --print-architecture) \
+#                  signed-by=/usr/share/keyrings/docker-archive-keyring.asc] \
+#                  https://download.docker.com/linux/debian \
+#                  $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+#        RUN apt-get update \
+#            && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+#                docker-ce-cli=$${DOCKER_CE_CLI_VERSION} \ <1>
+#            && rm -rf /var/lib/apt/lists/*
+    restart: on-failure
+    ports:
+      - "2210:22" <2>
+    environment:
+      - "JENKINS_AGENT_SSH_PUBKEY=[your-public-key]" <3>
+      # e.g. - "JENKINS_AGENT_SSH_PUBKEY=ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKBBHLJ+8RuLPO8dO1tm3RAt5kc3HqYwJUYMmRPjhtI3" 
+      - DOCKER_HOST=tcp://docker:2376
+      - DOCKER_CERT_PATH=/certs/client
+      - DOCKER_TLS_VERIFY=1
+    volumes:
+      - agent-home:/home/jenkins/agent:rw
+      - docker-certs:/certs/client:ro
+    networks:
+      agents:
+    depends_on:
+      - docker
+  docker:
+    container_name: jenkins-docker
+    image: docker:25
+    restart: on-failure
+    ports:
+      - "2376"
+    privileged: true
+    environment:
+       - DOCKER_TLS_CERTDIR=/certs
+    volumes:
+      - agent-home:/home/jenkins/agent:rw <4>
+      - docker-certs:/certs/client:rw
+      - docker-root:/var/lib/docker:rw
+    networks:
+      agents:
+        aliases:
+          - docker
+volumes:
+  agent-home:
+    name: jenkins-agent-home-dind
+  docker-certs:
+    name: jenkins-agent-docker-certs
+  docker-root:
+    name: jenkins-agent-docker-root
+networks:
+  agents:
+    external: true
+    name: jenkins-agents-dind
+```
++
+--
+<1> Extend the `jenkins/ssh-agent` image to install Docker CLI.
+<2> If your machine already has a ssh server running on the `22` port, use another port to publish the agent container port 22 (SSH), such as `2210:22`.
+<3> The value of `JENKINS_AGENT_SSH_PUBKEY` MUST include the full contents of your .pub file (i.e. _~/.ssh/jenkins_agent_key.pub_), including the `ssh-XXXX` prefix. 
+<4> Share the agent home volume (i.e. `agent-home`) to the Docker container, otherwise the pipeline will be stuck.
++
+```console
+. . .
+process apparently never started in /home/jenkins/agent/workspace/jenkins-getting-started_main@tmp/durable-7a43d858
+(running Jenkins temporarily with -Dorg.jenkinsci.plugins.durabletask.BourneShellScript.LAUNCH_DIAGNOSTICS=true might make the problem clearer)
+[Pipeline] }
+[Pipeline] // stage
+[Pipeline] }
+$ docker stop --time=1 383e1c4132052f8e461d87bf75108d3e627623cafe3de5f7f5ca80f843c324ae
+$ docker rm -f --volumes 383e1c4132052f8e461d87bf75108d3e627623cafe3de5f7f5ca80f843c324ae
+[Pipeline] // withDockerContainer
+[Pipeline] }
+[Pipeline] // withEnv
+[Pipeline] }
+[Pipeline] // node
+[Pipeline] End of Pipeline
+ERROR: script returned exit code -2
+Finished: FAILURE
+```
+--
+
+. (Optional) Create a compose file named _compose.override.yml_ with the following content:
++
+```yml
+version: "2.4"
+services:
+  agent:
+    build:
+      args:
+        - SSH_AGENET_TAG=jdk21
+        - DOCKER_CE_CLI_VERSION=5:25.0.1-1~debian.12~bookworm
+  docker:
+    image: docker:25
+    # If an insecure registry isn’t marked as insecure,
+    # docker pull, docker push, and docker search result
+    # in error messages, prompting the user to either
+    # secure or pass the --insecure-registry flag to the
+    # Docker daemon.
+    # command: ["--insecure-registry=192.168.56.0/24"]
+```
+
+. Starting the agent and docker container:
++
+```sh
+docker compose up -d
+```
