@@ -35,7 +35,7 @@ version: "2.4"
 services:
   agent:
     container_name: jenkins-agent-dind
-    image: qqbuby/jenkins-ssh-dind-agent:5.25.0-jdk21
+    image: docker pull qqbuby/jenkins-ssh-agent-extension:latest
 #    build:
 #      context: .
 #      dockerfile_inline: |
