@@ -22,4 +22,5 @@ RUN apt-get update \
         docker-ce-cli=${DOCKER_CE_CLI_VERSION} \ 
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl -fsSLo /usr/bin/kubectl https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl
+RUN curl -fsSLo /usr/bin/kubectl https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl \
+    && chmod +x /usr/bin/kubectl
